@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Run Altamash Run - Islamic Mode</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        body { margin: 0; background-color: #050510; overflow: hidden; touch-action: none; font-family: sans-serif; }
+        canvas { display: block; margin: 0 auto; background: #0d1117; }
+        
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        #score-board { position: absolute; top: 20px; left: 20px; color: #ffd700; font-size: 24px; font-weight: bold; text-shadow: 2px 2px 0 #000; }
+        #mute-btn { position: absolute; top: 20px; right: 20px; font-size: 30px; pointer-events: auto; cursor: pointer; }
+        #message { position: absolute; top: 40%; width: 100%; text-align: center; color: white; font-size: 40px; font-weight: bold; display: none; text-shadow: 0 0 10px blue; }
+
+        #controls { position: absolute; bottom: 20px; width: 100%; height: 100px; display: flex; justify-content: space-between; padding: 0 20px; box-sizing: border-box; pointer-events: none; }
+        .btn { width: 80px; height: 80px; background: rgba(255,255,255,0.15); border-radius: 50%; border: 2px solid rgba(255,255,255,0.5); display: flex; align-items: center; justify-content: center; color: white; font-size: 30px; pointer-events: auto; backdrop-filter: blur(5px); user-select: none; }
+        .btn:active { background: rgba(255,255,255,0.4); transform: scale(0.95); }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <div id="score-board">💰 Coins: <span id="score">0</span></div>
+    <div id="mute-btn">🔇</div>
+    <div id="message">GAME OVER</div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<div id="controls">
+    <div style="display:flex; gap:20px;">
+        <div class="btn" id="leftBtn">←</div>
+        <div class="btn" id="rightBtn">→</div>
+    </div>
+    <div class="btn" id="jumpBtn">↑</div>
+</div>
+
+<script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    
+    function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // =========================================================
+    // 💬 MOTIVATIONAL MESSAGES (EDIT HERE)
+    // =========================================================
+    const MESSAGES = [
+        "You Can Do It!! 🤲",
+        "Run Altamash Run! 🏃‍♂️",
+        "Himmat Mat Haaro! 💪",
+        "Sabr... (Patience) 🌙",
+        "MashaAllah! Good Jump! ✨",
+        "The Queen is Waiting! 👑",
+        "Keep Going! 🚀",
+        "We are with you! ❤️",
+        "Focus on the Goal! 🎯"
+    ];
+
+    // =========================================================
+    // 🛠️ SIZE SETTINGS
+    // =========================================================
+    const HERO_SIZE   = { w: 60, h: 90 };   
+    const QUEEN_SIZE  = { w: 60, h: 90 };   
+    const WIZARD_SIZE = { w: 70, h: 90 };   
+    const TREE_SIZE   = { w: 60, h: 160 };  
+    const COIN_SIZE   = { w: 30, h: 30 };   
+
+    // --- ASSETS ---
+    const assets = {
+        hero: new Image(), queen: new Image(), bg: new Image(), coin: new Image(), 
+        wizard: new Image(),
+        rainSound: new Audio("rain.mp3"), coinSound: new Audio("coin.mp3"),
+        winSound: new Audio("win.mp3"), loseSound: new Audio("lose.mp3")
+    };
+    assets.hero.src = "https://raw.githubusercontent.com/Mustafashk786/run/refs/heads/main/altamash.png"; 
+    assets.queen.src = "https://raw.githubusercontent.com/Mustafashk786/run/refs/heads/main/queen.png"; 
+    assets.bg.src = "https://raw.githubusercontent.com/Mustafashk786/run/refs/heads/main/bg.png"; 
+    assets.coin.src = "coin.png";
+    assets.wizard.src = "https://raw.githubusercontent.com/Mustafashk786/run/refs/heads/main/sakib.png"; 
+
+    assets.rainSound.loop = true;
+    let soundEnabled = false;
+
+    // --- VARIABLES ---
+    let gameRunning = true;
+    let score = 0;
+    let cameraX = 0;
+    let frameCount = 0;
+    let activeMessage = "Bismillah! 🤲"; // Starting Message
+
+    const player = { x: 100, y: 100, w: HERO_SIZE.w, h: HERO_SIZE.h, vx: 0, vy: 0, speed: 6, jump: -15, grounded: false, facingRight: true };
+    const rainDrops = Array.from({length: 100}, () => ({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, speed: Math.random() * 10 + 15 }));
+    let projectiles = [];
+
+    // --- 🗺️ LEVEL MAP ---
+    const level = [
+        {x: 0, y: 450, w: 800, h: 60, type: 1}, 
+        {x: 300, y: 350, w: COIN_SIZE.w, h: COIN_SIZE.h, type: 3}, 
+        {x: 500, y: 300, w: TREE_SIZE.w, h: TREE_SIZE.h, type: 7},
+
+        {x: 900, y: 450, w: 400, h: 60, type: 1},
+        {x: 1100, y: 360, w: WIZARD_SIZE.w, h: WIZARD_SIZE.h, type: 9},
+
+        {x: 1400, y: 400, w: 150, h: 40, type: 1},
+        {x: 1600, y: 350, w: 150, h: 40, type: 1},
+        {x: 1650, y: 300, w: COIN_SIZE.w, h: COIN_SIZE.h, type: 3},
+
+        {x: 1850, y: 400, w: 400, h: 60, type: 1},
+        {x: 2100, y: 310, w: WIZARD_SIZE.w, h: WIZARD_SIZE.h, type: 9}, 
+
+        {x: 2350, y: 450, w: 600, h: 60, type: 1},
+        {x: 2400, y: 300, w: TREE_SIZE.w, h: TREE_SIZE.h, type: 7},
+        {x: 2600, y: 300, w: TREE_SIZE.w, h: TREE_SIZE.h, type: 7},
+        
+        {x: 3000, y: 350, w: 200, h: 40, type: 1},
+        {x: 3100, y: 250, w: COIN_SIZE.w, h: COIN_SIZE.h, type: 3}, 
+
+        {x: 3300, y: 450, w: 500, h: 60, type: 1},
+        {x: 3500, y: 360, w: WIZARD_SIZE.w, h: WIZARD_SIZE.h, type: 9}, 
+
+        {x: 3900, y: 400, w: 100, h: 40, type: 1},
+        {x: 4100, y: 320, w: 100, h: 40, type: 1},
+        {x: 4300, y: 240, w: 100, h: 40, type: 1},
+        {x: 4350, y: 180, w: COIN_SIZE.w, h: COIN_SIZE.h, type: 3}, 
+
+        {x: 4500, y: 450, w: 800, h: 60, type: 1},
+        {x: 4700, y: 300, w: TREE_SIZE.w, h: TREE_SIZE.h, type: 7},
+        
+        {x: 5000, y: 360, w: WIZARD_SIZE.w, h: WIZARD_SIZE.h, type: 9}, 
+
+        {x: 5200, y: 380, w: QUEEN_SIZE.w, h: QUEEN_SIZE.h, type: 4}
+    ];
+
+    let keys = { left: false, right: false, up: false };
+
+    // --- FUNCTIONS ---
+    function playSound(sound) { 
+        if (soundEnabled && sound.readyState >= 2) { 
+            sound.currentTime = 0; 
+            sound.play().catch(()=>{}); 
+        } 
+    }
+    
+    document.getElementById("mute-btn").onclick = () => {
+        soundEnabled = !soundEnabled;
+        const btn = document.getElementById("mute-btn");
+        if(soundEnabled) { 
+            btn.innerHTML = "🔊"; 
+            assets.rainSound.play().catch(()=>{}); 
+        } else { 
+            btn.innerHTML = "🔇"; 
+            assets.rainSound.pause(); 
+        }
+    };
+
+    function update() {
+        if(!gameRunning) return;
+        frameCount++;
+
+        // Change Message every 3 seconds (approx 180 frames)
+        if (frameCount % 180 === 0) {
+            // Pick a random message from the list
+            activeMessage = MESSAGES[Math.floor(Math.random() * MESSAGES.length)];
+        }
+
+        if (keys.right) { player.vx = player.speed; player.facingRight = true; }
+        else if (keys.left) { player.vx = -player.speed; player.facingRight = false; }
+        else { player.vx = 0; }
+
+        if (keys.up && player.grounded) { player.vy = player.jump; player.grounded = false; }
+
+        player.vy += 0.8; 
+        player.x += player.vx;
+        player.y += player.vy;
+
+        cameraX = player.x - 150; 
+
+        rainDrops.forEach(d => {
+            d.y += d.speed; d.x -= 2;
+            if (d.y > canvas.height) { d.y = -20; d.x = cameraX + Math.random() * canvas.width + 200; }
+        });
+
+        // Wizard Logic
+        if (frameCount % 120 === 0) { 
+            level.forEach(p => {
+                if (p.type === 9) { 
+                    if (Math.abs(player.x - p.x) < 700) { 
+                        projectiles.push({ x: p.x, y: p.y + 30, vx: -6, w: 20, h: 20 });
+                    }
+                }
+            });
+        }
+
+        for (let i = projectiles.length - 1; i >= 0; i--) {
+            let p = projectiles[i];
+            p.x += p.vx;
+            if (p.x < cameraX - 100) projectiles.splice(i, 1);
+            if (rectIntersect(player.x, player.y, player.w, player.h, p.x, p.y, p.w, p.h)) {
+                endGame(false);
+            }
+        }
+
+        if(player.y > 1000) endGame(false);
+        checkCollisions();
+    }
+
+    function checkCollisions() {
+        player.grounded = false;
+        for (let i = 0; i < level.length; i++) {
+            let p = level[i];
+            if (rectIntersect(player.x, player.y, player.w, player.h, p.x, p.y, p.w, p.h)) {
+                if (p.type === 1) { 
+                    if (player.vy > 0 && player.y + player.h - player.vy <= p.y + 10) {
+                        player.grounded = true; player.vy = 0; player.y = p.y - player.h;
+                    }
+                }
+                else if (p.type === 3) { 
+                    score++; 
+                    playSound(assets.coinSound);
+                    document.getElementById("score").innerText = score;
+                    level.splice(i, 1);
+                }
+                else if (p.type === 4) endGame(true); 
+            }
+        }
+    }
+
+    function rectIntersect(x1, y1, w1, h1, x2, y2, w2, h2) {
+        return x2 < x1 + w1 && x2 + w2 > x1 && y2 < y1 + h1 && y2 + h2 > y1;
+    }
+
+    function endGame(win) {
+        gameRunning = false;
+        const msg = document.getElementById("message");
+        msg.style.display = "block";
+        if(win) {
+            msg.innerHTML = "QUEEN SAVED! ❤️<br><span style='font-size:20px'>Tap to Play Again</span>";
+            msg.style.color = "#00ff00";
+            playSound(assets.winSound);
+        } else {
+            msg.innerHTML = "YOU DIED ☠️<br><span style='font-size:20px'>Tap to Restart</span>";
+            msg.style.color = "red";
+            playSound(assets.loseSound);
+        }
+        assets.rainSound.pause();
+        setTimeout(() => { document.body.onclick = () => location.reload(); }, 500);
+    }
+
+    function draw() {
+        ctx.fillStyle = "#050510";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (assets.bg.complete && assets.bg.naturalWidth !== 0) ctx.drawImage(assets.bg, 0, 0, canvas.width, canvas.height);
+
+        ctx.save();
+        ctx.translate(-cameraX, 0);
+
+        // Draw Message
+        ctx.font = "bold 24px sans-serif";
+        ctx.fillStyle = "gold";
+        ctx.textAlign = "center";
+        ctx.fillText(activeMessage, cameraX + canvas.width/2, 50); // Draw text at top center
+
+        level.forEach(p => {
+            if (p.type === 1) { 
+                ctx.fillStyle = "#444"; ctx.fillRect(p.x, p.y, p.w, p.h);
+                ctx.strokeStyle = "#666"; ctx.strokeRect(p.x, p.y, p.w, p.h);
+            } 
+            else if (p.type === 3) { 
+                if (assets.coin.complete && assets.coin.naturalWidth !== 0) ctx.drawImage(assets.coin, p.x, p.y, p.w, p.h);
+                else { ctx.fillStyle = "gold"; ctx.beginPath(); ctx.arc(p.x + p.w/2, p.y + p.h/2, p.w/2, 0, Math.PI*2); ctx.fill(); }
+            }
+            else if (p.type === 4) { 
+                if (assets.queen.complete && assets.queen.naturalWidth !== 0) ctx.drawImage(assets.queen, p.x, p.y, p.w, p.h);
+                else { ctx.fillStyle = "#ff00ff"; ctx.fillRect(p.x, p.y, p.w, p.h); }
+            }
+            else if (p.type === 7) { 
+                ctx.fillStyle = "#654321"; ctx.fillRect(p.x + p.w/4, p.y + 50, p.w/2, 100);
+                ctx.fillStyle = "#228b22"; ctx.beginPath(); ctx.arc(p.x + p.w/2, p.y + 50, p.w, 0, Math.PI*2); ctx.fill();
+            }
+            else if (p.type === 9) { 
+                if (assets.wizard.complete && assets.wizard.naturalWidth !== 0) {
+                    ctx.drawImage(assets.wizard, p.x, p.y, p.w, p.h);
+                } else {
+                    ctx.fillStyle = "purple"; ctx.fillRect(p.x, p.y, p.w, p.h);
+                    ctx.fillStyle = "white"; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x+p.w/2, p.y-30); ctx.lineTo(p.x+p.w, p.y); ctx.fill();
+                }
+            }
+        });
+
+        ctx.fillStyle = "orange";
+        projectiles.forEach(p => {
+            ctx.beginPath(); ctx.arc(p.x + p.w/2, p.y + p.h/2, 10, 0, Math.PI*2); ctx.fill();
+        });
+
+        if (assets.hero.complete && assets.hero.naturalWidth !== 0) {
+            ctx.save();
+            if (!player.facingRight) { ctx.translate(player.x + player.w, player.y); ctx.scale(-1, 1); ctx.drawImage(assets.hero, 0, 0, player.w, player.h); } 
+            else { ctx.drawImage(assets.hero, player.x, player.y, player.w, player.h); }
+            ctx.restore();
+        } else {
+            ctx.fillStyle = "#3498db"; ctx.fillRect(player.x, player.y, player.w, player.h);
+        }
+
+        ctx.restore();
+
+        ctx.strokeStyle = "rgba(100, 150, 255, 0.5)"; ctx.lineWidth = 2; ctx.beginPath();
+        rainDrops.forEach(d => { ctx.moveTo(d.x, d.y); ctx.lineTo(d.x - 2, d.y + 10); });
+        ctx.stroke();
+
+        requestAnimationFrame(() => { update(); draw(); });
+    }
+
+    const leftBtn = document.getElementById("leftBtn");
+    const rightBtn = document.getElementById("rightBtn");
+    const jumpBtn = document.getElementById("jumpBtn");
+
+    leftBtn.ontouchstart = (e) => { e.preventDefault(); keys.left = true; };
+    leftBtn.ontouchend = (e) => { e.preventDefault(); keys.left = false; };
+    rightBtn.ontouchstart = (e) => { e.preventDefault(); keys.right = true; };
+    rightBtn.ontouchend = (e) => { e.preventDefault(); keys.right = false; };
+    jumpBtn.ontouchstart = (e) => { e.preventDefault(); keys.up = true; };
+    jumpBtn.ontouchend = (e) => { e.preventDefault(); keys.up = false; };
+
+    window.addEventListener("keydown", e => { if(e.key === "ArrowLeft") keys.left = true; if(e.key === "ArrowRight") keys.right = true; if(e.key === " " || e.key === "ArrowUp") keys.up = true; });
+    window.addEventListener("keyup", e => { if(e.key === "ArrowLeft") keys.left = false; if(e.key === "ArrowRight") keys.right = false; if(e.key === " " || e.key === "ArrowUp") keys.up = false; });
+
+    update(); draw();
+</script>
+</body>
+</html>
